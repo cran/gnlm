@@ -2,7 +2,7 @@
 \title{Fit a Generalized Nonlinear Regression Model}
 \usage{
 gnlr(y, distribution="normal", mu=NULL, shape=NULL, linear=NULL,
-	pmu=NULL, pshape=NULL, exact=F, wt=1, delta=1, shfn=F,
+	pmu=NULL, pshape=NULL, exact=F, wt=1, delta=1, shfn=F, common=F,
 	envir=sys.frame(sys.parent()), print.level=0, typsiz=abs(p),
 	ndigit=10, gradtol=0.00001, stepmax=10*sqrt(p\%*\%p),
 	steptol=0.00001, iterlim=100, fscale=1)
@@ -67,8 +67,16 @@ ignored.)}
 \item{shfn}{If true, the supplied shape function depends on the
 location (function). The name of this location function must be the
 last argument of the shape function.}
+\item{common}{If TRUE, \code{mu} and \code{shape} must both be
+functions with, as argument, a vector of parameters having some or all
+elements in common between them so that indexing is in common
+between them; all parameter estimates must be supplied in \code{pmu}.
+If FALSE, parameters are distinct between the two functions and
+indexing starts at one in each function.}
 \item{envir}{Environment in which model formulae are to be
-interpreted.}
+interpreted or a data object of class, repeated, tccov, or tvcov.
+If \code{y} has class \code{repeated}, it is used as the
+environment.}
 \item{others}{Arguments controlling \code{\link{nlm}}.}
 }
 \description{
@@ -116,7 +124,7 @@ gnlr(y, dist="inverse Gauss", mu=~b0+b1*sex+b2*age,
 	pmu=list(b0=1,b1=1,b2=1), pshape=1)
 #
 # nonlinear regression with inverse Gauss distribution
-mu <- function(p, linear) p[4]+exp(linear)
+mu <- function(p, linear) p[1]+exp(linear)
 gnlr(y, dist="inverse Gauss", mu=mu, linear=~sex+age, pmu=rep(1,4),
 	pshape=1)
 # or equivalently

@@ -31,7 +31,9 @@ the first intercept parameter (difference in intercept for successive
 categories): two less than the number of different ordinal values.}
 \item{wt}{Weight vector for use with contingency tables.}
 \item{envir}{Environment in which model formulae are to be
-interpreted.}
+interpreted or a data object of class, repeated, tccov, or tvcov.
+If \code{y} has class \code{repeated}, it is used as the
+environment.}
 \item{others}{Arguments controlling \code{\link{nlm}}.}
 }
 \description{

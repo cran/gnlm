@@ -48,6 +48,7 @@ call <- sys.call()
 tmp <- c("proportional odds","continuation ratio","adjacent categories")
 mdl <- match(distribution <- match.arg(distribution,tmp),tmp)
 if(!is.vector(y,mode="numeric"))stop("y must be a vector")
+if(any(is.na(y)))stop("NAs in y - use rmna")
 if(min(y)!=1)stop("ordinal values must start at 1")
 else if(any(y!=trunc(y)))stop("ordinal values must be integers")
 else my <- max(y)-1
@@ -60,38 +61,52 @@ npl1 <- npl+1
 if(missing(pintercept)||length(pintercept)!=my-1)
 	stop(paste(my-1,"initial values of intercept parameters must be supplied"))
 if(inherits(mu,"formula"))linear <- mu
+respenv <- inherits(y,"repeated")
+envname <- if(respenv)paste(deparse(substitute(y)))
+	else NULL
 lin1a <- mu2 <- name <- NULL
-if(inherits(envir,"repeated")||inherits(envir,"tccov")){
-	type <- if(inherits(envir,"repeated"))"repeated"
+if(respenv||inherits(envir,"repeated")||inherits(envir,"tccov")){
+	type <- if(respenv||inherits(envir,"repeated"))"repeated"
 		else "tccov"
+	if(is.null(envname))envname <- paste(deparse(substitute(envir)))
 	if(inherits(linear,"formula")){
-		lin1a <- finterp(linear)
+		if(is.function(mu)){
+			lin1a <- if(respenv)finterp(linear,envir=y,name=envname)
+			else finterp(linear,envir=envir,name=envname)}
 		class(linear) <- c(class(linear),type)}
-	name <- paste(deparse(substitute(envir)))
 	if(is.function(mu)){
-		mu2 <- mu
-		attributes(mu2) <- attributes(fnenvir(mu))
+		tmp <- parse(text=paste(deparse(mu))[-1])
 		class(mu) <- type
-		mu <- fnenvir(mu,envir=envir,name=name)}}
+		mu <- if(respenv)fnenvir(mu,envir=y,name=envname)
+			else fnenvir(mu,envir=envir,name=envname)
+		mu2 <- mu
+		if(respenv)attr(mu2,"model") <- tmp}}
 if(inherits(linear,"formula")){
-	mu1 <- finterp(linear,envir=envir,name=name)
+	mu1 <- if(respenv)finterp(linear,envir=y,name=envname)
+		else finterp(linear,envir=envir,name=envname)
 	npt1 <- length(attr(mu1,"parameters"))
 	if(is.matrix(attr(mu1,"model"))){
 		if(all(dim(attr(mu1,"model"))==1)){
 			if(is.function(mu)){
 				dm1 <- attr(mu1,"model")
-				mu1 <- function(p) mu(p,p[1]*rep(1,n))}
+				mu1 <- function(p) mu(p,p[npl]*rep(1,nrows))}
 			else {
 				tmp <- attributes(mu1)
-				mu1 <- function(p) p[1]*rep(1,n)
+				mu1 <- function(p) p[1]*rep(1,nrows)
 				attributes(mu1) <- tmp}}
 		else {
 			if(nrow(attr(mu1,"model"))!=nrows)stop("mu model matrix does not match number of response observations")
 			if(is.function(mu)){
+				lf <- if(inherits(mu,"formulafn"))length(attr(mu,"parameters"))
+					else length(if(respenv)attr(fnenvir(mu,envir=y),"parameters")
+						else attr(fnenvir(mu,envir=envir),"parameters"))
 				dm1 <- attr(mu1,"model")
 				linear <- mu1
-				mu1 <- function(p) mu(p,dm1%*%p[1:npt1])}}}
+				mu1 <- function(p) mu(p,dm1%*%p[lf:npl])}}}
 	else {
+		if(is.function(mu)){
+			warning("ignoring mu function\n")
+			mu <- mu2 <- NULL}
 		if(npl!=npt1){
 			cat("\nParameters are ")
 			cat(attr(mu1,"parameters"),"\n")
@@ -111,9 +126,13 @@ else {
 	if(length(mu1(pmu))==1)mu1 <- function(p) mu(p)*rep(1,nrows)}
 if(is.null(attributes(mu1))){
 	attributes(mu1) <- if(is.function(mu)){
-		if(!inherits(mu,"formulafn"))attributes(fnenvir(mu))
+		if(!inherits(mu,"formulafn")){
+			if(respenv)attributes(fnenvir(mu,envir=y))
+			else attributes(fnenvir(mu,envir=envir))}
 		else attributes(mu)}
-		else attributes(fnenvir(mu1))}
+		else {
+			if(respenv)attributes(fnenvir(mu1,envir=y))
+			else attributes(fnenvir(mu1,envir=envir))}}
 nlp <- if(is.function(mu)){
 		if(is.null(linear))length(attr(mu1,"parameters"))
 		else length(attr(mu1,"parameters"))-1+npt1}

@@ -37,22 +37,30 @@ if(!missing(distribution))distribution <- match.arg(distribution,c("normal","inv
 if(missing(pmu))stop("Initial parameter estimates must be supplied")
 np <- length(pmu)
 if(!is.vector(y,mode="numeric"))stop("y must be a vector")
+if(any(is.na(y)))stop("NAs in y - use rmna")
 n <- length(y)
-mu2 <- name <- NULL
-if(inherits(envir,"repeated")||inherits(envir,"tccov")){
-	name <- paste(deparse(substitute(envir)))
+mu2 <- NULL
+respenv <- inherits(y,"repeated")
+envname <- if(respenv)paste(deparse(substitute(y)))
+	else NULL
+if(respenv||inherits(envir,"repeated")||inherits(envir,"tccov")){
+	if(is.null(envname))envname <- paste(deparse(substitute(envir)))
 	if(inherits(mu,"formula")){
-		mu2 <- finterp(mu)
+		mu2 <- if(respenv)finterp(mu,envir=y,name=envname)
+			else finterp(mu,envir=envir,name=envname)
 		class(mu) <- c(class(mu),type)}
 	else if(is.function(mu)){
-		mu2 <- mu
-		attributes(mu2) <- attributes(fnenvir(mu))
-		class(mu) <- if(inherits(envir,"repeated"))"repeated"
+		tmp <- parse(text=paste(deparse(mu))[-1])
+		class(mu) <- if(respenv||inherits(envir,"repeated"))"repeated"
 			else "tccov"
-		mu <- fnenvir(mu,envir=envir,name=name)}}
+		mu <- if(respenv)fnenvir(mu,envir=y,name=envname)
+			else fnenvir(mu,envir=envir,name=envname)
+		mu2 <- mu
+		if(respenv)attr(mu2,"model") <- tmp}}
 if(inherits(mu,"formula")){
 	mu1 <- mu
-	mu <- finterp(mu,envir=envir,name=name)
+	mu <- if(respenv)finterp(mu,envir=y,name=envname)
+		else finterp(mu,envir=envir,name=envname)
 	npt1 <- length(attr(mu,"parameters"))
 	if(is.matrix(attr(mu,"model"))){
 		if(all(dim(attr(mu,"model"))==1)){
@@ -71,7 +79,9 @@ if(inherits(mu,"formula")){
 				if(sum(!is.na(o))!=length(pmu))stop("invalid estimates for mu - probably wrong names")}
 			else pmu <- unlist(pmu)}}}
 if(is.null(attributes(mu))){
-	attributes(mu) <- if(!inherits(mu,"formulafn"))attributes(fnenvir(mu))
+	attributes(mu) <- if(!inherits(mu,"formulafn")){
+			if(respenv)attributes(fnenvir(mu,envir=y))
+			else attributes(fnenvir(mu,envir=envir))}
 		else attributes(mu)}
 nlp <- if(is.function(mu1))length(attr(mu,"parameters"))
        else npt1

@@ -20,9 +20,9 @@
 #
 #     fmr(y, distribution="normal", mu=NULL, mix=NULL, linear=NULL,
 #	pmu=NULL, pmix=NULL, pshape=NULL, censor="right", exact=F,
-#	wt=1, delta=1, envir=sys.frame(sys.parent()), print.level=0,
-#	typsiz=abs(p), ndigit=10, gradtol=0.00001, stepmax=10*sqrt(p%*%p),
-#	steptol=0.00001, iterlim=100, fscale=1)
+#	wt=1, delta=1, common=F, envir=sys.frame(sys.parent()),
+#	print.level=0, typsiz=abs(p), ndigit=10, gradtol=0.00001,
+#	stepmax=10*sqrt(p%*%p), steptol=0.00001, iterlim=100, fscale=1)
 #
 #  DESCRIPTION
 #
@@ -31,7 +31,7 @@
 
 fmr <- function(y, distribution="normal", mu=NULL, mix=NULL, linear=NULL,
 	pmu=NULL, pmix=NULL, pshape=NULL, censor="right", exact=F,
-	wt=1, delta=1, envir=sys.frame(sys.parent()), print.level=0,
+	wt=1, delta=1, common=F, envir=sys.frame(sys.parent()), print.level=0,
 	typsiz=abs(p), ndigit=10, gradtol=0.00001, stepmax=10*sqrt(p%*%p),
 	steptol=0.00001, iterlim=100, fscale=1){
 
@@ -63,6 +63,10 @@ if(!missing(distribution)&&!is.function(distribution)){
 	"double Poisson","mult Poisson","gamma count","Consul","geometric",
 	"normal","inverse Gauss","logistic","exponential","gamma","Weibull",
 	"extreme value","Pareto","Cauchy","Student t","Laplace","Levy"))}
+if(common){
+	if(!is.function(mu))stop("with common parameters, mu must be a function")
+	if(!is.function(mix))stop("with common parameters, mix must be a function")
+	if(!is.null(linear))stop("linear cannot be used with common parameters")}
 if(!missing(pmu))npl <- length(pmu)
 else npl <- 0
 if(!missing(pmix))npm <- length(pmix)
@@ -75,19 +79,189 @@ np <- npl+npm+sht
 if(is.function(distribution)){
 	fcn <- distribution
 	distribution <- "own"}
-if(inherits(y,"repeated")){
+respenv <- inherits(y,"repeated")
+envname <- if(respenv)paste(deparse(substitute(y)))
+	else NULL
+lin1 <- lin2 <- NULL
+if(is.list(linear)){
+	lin1 <- linear[[1]]
+	lin2 <- linear[[2]]}
+else lin1 <- linear
+if(inherits(mu,"formula"))lin1 <- mu
+if(inherits(mix,"formula"))lin2 <- mix
+lin1a <- lin2a <- mu2 <- mixt2 <- NULL
+if(respenv||inherits(envir,"repeated")||inherits(envir,"tccov")){
+	type <- if(respenv||inherits(envir,"repeated"))"repeated"
+		else "tccov"
+	if(is.null(envname))envname <- paste(deparse(substitute(envir)))
+	if(inherits(lin1,"formula")){
+		if(is.function(mu)){
+			lin1a <- if(respenv)finterp(lin1,envir=y,name=envname)
+			else finterp(lin1,envir=envir,name=envname)}
+		class(lin1) <- c(class(lin1),type)}
+	if(inherits(lin2,"formula")){
+		if(is.function(mix)){
+			lin2a <- if(respenv)finterp(lin2,envir=y,name=envname)
+			else finterp(lin2,envir=envir,name=envname)}
+		class(lin2) <- c(class(lin2),type)}
+	if(is.function(mu)){
+		tmp <- parse(text=paste(deparse(mu))[-1])
+		class(mu) <- type
+		mu <- if(respenv)fnenvir(mu,envir=y,name=envname)
+			else fnenvir(mu,envir=envir,name=envname)
+		mu2 <- mu
+		if(respenv)attr(mu2,"model") <- tmp}
+	if(is.function(mix)){
+		tmp <- parse(text=paste(deparse(mix))[-1])
+		class(mix) <- type
+		mix <- if(respenv)fnenvir(mix,envir=y,name=envname)
+			else fnenvir(mix,envir=envir,name=envname)
+		mixt2 <- mix
+		if(respenv)attr(mixt2,"model") <- tmp}}
+if(inherits(lin1,"formula")){
+	mu1 <- if(respenv)finterp(lin1,envir=y,name=envname)
+		else finterp(lin1,envir=envir,name=envname)
+	npt1 <- length(attr(mu1,"parameters"))
+	if(is.matrix(attr(mu1,"model"))){
+		if(all(dim(attr(mu1,"model"))==1)){
+			if(is.function(mu)){
+				lin1 <- mu1
+				mu1 <- function(p) mu(p,p[npl]*rep(1,n))}
+			else {
+				tmp <- attributes(mu1)
+				mu1 <- function(p) p[1]*rep(1,n)
+				attributes(mu1) <- tmp}}
+		else {
+			if(is.function(mu)){
+				lf <- if(inherits(mu,"formulafn"))length(attr(mu,"parameters"))
+					else length(if(respenv)attr(fnenvir(mu,envir=y),"parameters")
+						else attr(fnenvir(mu,envir=envir),"parameters"))
+				dm1 <- attr(mu1,"model")
+				lin1 <- mu1
+				mu1 <- function(p) mu(p,dm1%*%p[lf:(lf+npt1-1)])}}}
+	else {
+		if(is.function(mu)){
+			warning("ignoring mu function\n")
+			mu <- mu2 <- NULL}
+		if(npl!=npt1){
+			cat("\nParameters are ")
+			cat(attr(mu1,"parameters"),"\n")
+			stop(paste("pmu should have",npt1,"estimates"))}
+		if(is.list(pmu)){
+			if(!is.null(names(pmu))){
+				o <- match(attr(mu1,"parameters"),names(pmu))
+				pmu <- unlist(pmu)[o]
+				if(sum(!is.na(o))!=length(pmu))stop("invalid estimates for mu - probably wrong names")}
+			else pmu <- unlist(pmu)}}
+	if(npl<npt1)stop("Not enough initial estimates for mu")}
+else if(!is.function(mu)){
+	mu1 <- function(p) p[1]*rep(1,n)
+	npt1 <- 1}
+else {
+	mu1 <- mu
+	if(length(mu1(pmu))==1)mu1 <- function(p) mu(p)*rep(1,n)}
+if(is.null(attributes(mu1))){
+	attributes(mu1) <- if(is.function(mu)){
+		if(!inherits(mu,"formulafn")){
+			if(respenv)attributes(fnenvir(mu,envir=y))
+			else attributes(fnenvir(mu,envir=envir))}
+		else attributes(mu)}
+		else {
+			if(respenv)attributes(fnenvir(mu1,envir=y))
+			else attributes(fnenvir(mu1,envir=envir))}}
+nlp <- if(is.function(mu)){
+		if(is.null(lin1))length(attr(mu1,"parameters"))
+		else length(attr(mu1,"parameters"))-1+npt1}
+       else npt1
+if(!common&&nlp!=npl)stop(paste("pmu should have",nlp,"initial estimates"))
+npl1 <- if(common) 1 else npl+1
+if(inherits(lin2,"formula")){
+	mixt1 <- if(respenv)finterp(lin2,envir=y,start=npl1,name=envname)
+		else finterp(lin2,envir=envir,start=npl1,name=envname)
+	npt2 <- length(attr(mixt1,"parameters"))
+	if(is.matrix(attr(mixt1,"model"))){
+		if(all(dim(attr(mixt1,"model"))==1)){
+			if(is.function(mix)){
+				lin2 <- mixt1
+				mixt <- function(p) {
+					mf <- mix(p[npl1:np],p[np]*rep(1,n))
+					exp(mf)/(1+exp(mf))}}
+			else {
+				mixt <- function(p) {
+					mf <- p[npl1]*rep(1,n)
+					exp(mf)/(1+exp(mf))}
+				mixt2 <- fnenvir(function(p) {
+					mf <- p[1]*rep(1,n)
+					exp(mf)/(1+exp(mf))})
+				attributes(mixt) <- attributes(mixt1)}
+			rm(mixt1)}
+		else {
+			dm2 <- attr(mixt1,"model")
+			if(is.function(mix))mixt <- function(p) {
+				lfm <- if(inherits(mix,"formulafn"))length(attr(mix,"parameters"))
+					else length(if(respenv)attr(fnenvir(mix,envir=y),"parameters")
+						else attr(fnenvir(mix,envir=envir),"parameters"))
+				lin2 <- mixt1
+				mf <- mix(p[npl1:np],dm2%*%p[(npl+lfm):np])
+				exp(mf)/(1+exp(mf))}
+			else {
+				mixt <- function(p) {
+					mf <- dm2%*%p[npl1:(npl1+npt2-1)]
+					exp(mf)/(1+exp(mf))}
+				attributes(mixt) <- attributes(mixt1)}}}
+	else {
+		if(is.function(mix)){
+			warning("ignoring mix function\n")
+			mix <- mixt2 <- NULL}
+		if(npm!=npt2){
+			cat("\nParameters are ")
+			cat(attr(mixt1,"parameters"),"\n")
+			stop(paste("pmix should have",npt2,"estimates"))}
+		mixt <- function(p) {
+			mf <- mixt1(p)
+			exp(mf)/(1+exp(mf))}
+		attributes(mixt) <- attributes(mixt1)
+		if(is.list(pmix)){
+			if(!is.null(names(pmix))){
+				o <- match(attr(mixt,"parameters"),names(pmix))
+				pmix <- unlist(pmix)[o]
+				if(sum(!is.na(o))!=length(pmix))stop("invalid estimates for mix - probably wrong names")}
+			else pmix <- unlist(pmix)}}}
+else if(!is.function(mix)){
+	mixt <- function(p) exp(p[npl1])/(1+exp(p[npl1]))*rep(1,n)
+	mixt2 <- fnenvir(function(p) exp(p[1])/(1+exp(p[1]))*rep(1,n))
+	npt2 <- 1}
+else mixt <- function(p) {
+	mf <- mix(p[npl1:np])
+	exp(mf)/(1+exp(mf))}
+if(is.null(attributes(mixt))){
+	attributes(mixt) <- if(is.function(mix)){
+		if(!inherits(mix,"formulafn")){
+			if(respenv)attributes(fnenvir(mix,envir=y))
+			else attributes(fnenvir(mix,envir=envir))}
+		else attributes(mix)}
+		else {
+			if(respenv)attributes(fnenvir(mixt,envir=y))
+			else attributes(fnenvir(mixt,envir=envir))}}
+nlp <- if(is.function(mix)){
+		if(is.null(lin2))length(attr(mixt,"parameters"))
+		else length(attr(mixt,"parameters"))-1+npt2}
+       else npt2
+if(!common&&nlp!=npm)stop(paste("pshape should have",nlp,"initial estimates"))
+if(common){
+	nlp <- length(unique(c(attr(mu1,"parameters"),attr(mixt,"parameters"))))-shfn
+	if(nlp!=npl)stop(paste("with a common parameter model, pmu should contain",nlp,"estimates"))}
+p <- c(pmu,pmix,pshape)
+if(respenv){
 	if(inherits(envir,"repeated")&&(length(y$response$nobs)!=length(envir$response$nobs)||any(y$response$nobs!=envir$response$nobs)))stop("y and envir objects are incompatible")
 	if(!is.null(y$response$wt)&&!is.na(y$response$wt))wt <- y$response$wt
 	if(!is.null(y$response$delta))delta <- y$response$delta
-	if(!is.null(y$response$censor)&&any(y$response$censor!=1))y <- cbind(y$response$y,y$response$censor)
-	else if(!is.null(y$response$n))y <- cbind(y$response$y,y$response$n-y$response$y)
-	else y <- y$response$y}
+	y <- response(y)}
 else if(inherits(y,"response")){
 	if(!is.null(y$wt)&&!is.na(y$wt))wt <- y$wt
 	if(!is.null(y$delta))delta <- y$delta
-	if(!is.null(y$censor)&&any(y$censor!=1))y <- cbind(y$y,y$censor)
-	else if(!is.null(y$n))y <- cbind(y$y,y$n-y$y)
-	else y <- y$y}
+	y <- response(y)}
+if(any(is.na(y)))stop("NAs in y - use rmna")
 if(distribution=="Poisson"||distribution=="negative binomial"||
 	distribution=="double Poisson"||distribution=="mult Poisson"||
 	distribution=="gamma count"||distribution=="Consul"){
@@ -162,146 +336,7 @@ else if((distribution=="Poisson"||distribution=="negative binomial"||
 if(min(wt)<0)stop("All weights must be non-negative")
 if(length(wt)==1)wt <- rep(wt,n)
 if(length(delta)==1)delta <- rep(delta,n)
-lin1 <- lin2 <- NULL
-if(is.list(linear)){
-	lin1 <- linear[[1]]
-	lin2 <- linear[[2]]}
-else lin1 <- linear
-if(inherits(mu,"formula"))lin1 <- mu
-if(inherits(mix,"formula"))lin2 <- mix
-lin1a <- lin2a <- mu2 <- mixt2 <- name <- NULL
-if(inherits(envir,"repeated")||inherits(envir,"tccov")){
-	type <- if(inherits(envir,"repeated"))"repeated"
-		else "tccov"
-	if(inherits(lin1,"formula")){
-		lin1a <- finterp(lin1)
-		class(lin1) <- c(class(lin1),type)}
-	if(inherits(lin2,"formula")){
-		lin2a <- finterp(lin2)
-		class(lin2) <- c(class(lin2),type)}
-	name <- paste(deparse(substitute(envir)))
-	if(is.function(mu)){
-		mu2 <- mu
-		attributes(mu2) <- attributes(fnenvir(mu))
-		class(mu) <- type
-		mu <- fnenvir(mu,envir=envir,name=name)}
-	if(is.function(mix)){
-		mixt2 <- mix
-		attributes(mixt2) <- attributes(fnenvir(mix))
-		class(mix) <- type
-		mix <- fnenvir(mix,envir=envir,name=name)}}
-if(inherits(lin1,"formula")){
-	mu1 <- finterp(lin1,envir=envir,name=name)
-	npt1 <- length(attr(mu1,"parameters"))
-	if(is.matrix(attr(mu1,"model"))){
-		if(all(dim(attr(mu1,"model"))==1)){
-			if(is.function(mu)){
-				lin1 <- mu1
-				mu1 <- function(p) mu(p,p[1]*rep(1,n))}
-			else {
-				tmp <- attributes(mu1)
-				mu1 <- function(p) p[1]*rep(1,n)
-				attributes(mu1) <- tmp}}
-		else {
-			if(nrow(attr(mu1,"model"))!=n)stop("mu model matrix does not match number of response observations")
-			if(is.function(mu)){
-				dm1 <- attr(mu1,"model")
-				lin1 <- mu1
-				mu1 <- function(p) mu(p,dm1%*%p[1:npt1])}}}
-	else {
-		if(npl!=npt1){
-			cat("\nParameters are ")
-			cat(attr(mu1,"parameters"),"\n")
-			stop(paste("pmu should have",npt1,"estimates"))}
-		if(is.list(pmu)){
-			if(!is.null(names(pmu))){
-				o <- match(attr(mu1,"parameters"),names(pmu))
-				pmu <- unlist(pmu)[o]
-				if(sum(!is.na(o))!=length(pmu))stop("invalid estimates for mu - probably wrong names")}
-			else pmu <- unlist(pmu)}}
-	if(npl<npt1)stop("Not enough initial estimates for mu")}
-else if(!is.function(mu)){
-	mu1 <- function(p) p[1]*rep(1,n)
-	npt1 <- 1}
-else {
-	mu1 <- mu
-	if(length(mu1(pmu))==1)mu1 <- function(p) mu(p)*rep(1,n)}
-if(is.null(attributes(mu1))){
-	attributes(mu1) <- if(is.function(mu)){
-		if(!inherits(mu,"formulafn"))attributes(fnenvir(mu))
-		else attributes(mu)}
-		else attributes(fnenvir(mu1))}
-nlp <- if(is.function(mu)){
-		if(is.null(lin1))length(attr(mu1,"parameters"))
-		else length(attr(mu1,"parameters"))-1+npt1}
-       else npt1
-if(nlp!=npl)stop(paste("pmu should have",nlp,"initial estimates"))
 if(any(is.na(mu1(pmu))))stop("The location model returns NAs: probably invalid initial values")
-npl1 <- npl+1
-if(inherits(lin2,"formula")){
-	mixt1 <- finterp(lin2,envir=envir,start=npl1,name=name)
-	npt2 <- length(attr(mixt1,"parameters"))
-	if(is.matrix(attr(mixt1,"model"))){
-		if(all(dim(attr(mixt1,"model"))==1)){
-			if(is.function(mix)){
-				lin2 <- mixt1
-				mixt <- function(p) {
-					mf <- mix(p[npl1:np],p[npl1]*rep(1,n))
-					exp(mf)/(1+exp(mf))}}
-			else {
-				mixt <- function(p) {
-					mf <- p[npl1]*rep(1,n)
-					exp(mf)/(1+exp(mf))}
-				mixt2 <- fnenvir(function(p) {
-					mf <- p[1]*rep(1,n)
-					exp(mf)/(1+exp(mf))})
-				attributes(mixt) <- attributes(mixt1)}
-			rm(mixt1)}
-		else {
-			if(nrow(attr(mixt1,"model"))!=n)stop("mix model matrix does not match number of response observations")
-			dm2 <- attr(mixt1,"model")
-			if(is.function(mix))mixt <- function(p) {
-				lin2 <- mixt1
-				mf <- mix(p[npl1:np],dm2%*%p[npl1:(npl1+npt2-1)])
-				exp(mf)/(1+exp(mf))}
-			else {
-				mixt <- function(p) {
-					mf <- dm2%*%p[npl1:(npl1+npt2-1)]
-					exp(mf)/(1+exp(mf))}
-				attributes(mixt) <- attributes(mixt1)}}}
-	else {
-		if(npm!=npt2){
-			cat("\nParameters are ")
-			cat(attr(mixt1,"parameters"),"\n")
-			stop(paste("pmix should have",npt2,"estimates"))}
-		mixt <- function(p) {
-			mf <- mixt1(p)
-			exp(mf)/(1+exp(mf))}
-		attributes(mixt) <- attributes(mixt1)
-		if(is.list(pmix)){
-			if(!is.null(names(pmix))){
-				o <- match(attr(mixt,"parameters"),names(pmix))
-				pmix <- unlist(pmix)[o]
-				if(sum(!is.na(o))!=length(pmix))stop("invalid estimates for mix - probably wrong names")}
-			else pmix <- unlist(pmix)}}}
-else if(!is.function(mix)){
-	mixt <- function(p) exp(p[npl1])/(1+exp(p[npl1]))*rep(1,n)
-	mixt2 <- fnenvir(function(p) exp(p[1])/(1+exp(p[1]))*rep(1,n))
-	npt2 <- 1}
-else mixt <- function(p) {
-	mf <- mix(p[npl1:np])
-	exp(mf)/(1+exp(mf))}
-if(is.null(attributes(mixt))){
-	attributes(mixt) <- if(is.function(mix)){
-		if(!inherits(mix,"formulafn"))attributes(fnenvir(mix))
-		else attributes(mix)}
-		else attributes(fnenvir(mixt))}
-nlp <- if(is.function(mix)){
-		if(is.null(lin2))length(attr(mixt,"parameters"))
-		else length(attr(mixt,"parameters"))-1+npt2}
-       else npt2
-if(nlp!=npm)stop(paste("pshape should have",nlp,"initial estimates"))
-p <- c(pmu,pmix,pshape)
 if(distribution=="Levy"&&any(y[,1]<=mu1(p)))
 	stop("location parameter must be strictly less than corresponding observation")
 if(sht&&any(is.na((mixt(p)))))stop("The mix function returns NAs: probably invalid initial values")
@@ -691,6 +726,7 @@ z1 <- list(
 	mu=mu1,
 	mix=mixt,
 	linear=list(lin1,lin2),
+	common=common,
 	prior.weights=wt,
 	censor=censor,
 	maxlike=z0$minimum,

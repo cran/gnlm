@@ -1,5 +1,5 @@
 Package: gnlm
-Version: 0.4
+Version: 0.5
 Author: Jim Lindsey (jlindsey@luc.ac.be)
 Description: Generalized nonlinear regression models
 Depends: requires rmutil library

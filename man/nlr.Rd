@@ -32,7 +32,9 @@ measured to two decimals, delta=0.01. If the response is transformed,
 this must be multiplied by the Jacobian. For example, with a log
 transformation, \code{delta=1/y}.}
 \item{envir}{Environment in which model formulae are to be
-interpreted.}
+interpreted or a data object of class, repeated, tccov, or tvcov.
+If \code{y} has class \code{repeated}, it is used as the
+environment.}
 \item{others}{Arguments controlling \code{\link{nlm}}.}
 }
 \description{
